@@ -1,17 +1,41 @@
 
 
 #Programatically documents all scheduled tasks that meet certain filters 
+$ErrorActionPreference = "Stop"
+$RunDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+
+$jsonpath = "$RunDir\servers.txt"
+if(Test-Path $jsonpath){
+    [array]$Servers = Get-Content $jsonpath
+}else{
+    Write-Error "Missing servers.txt in root directory"
+}
 
 
+Clear-Host
+"Scheduled.Task.Inventory"
+"This Script will use NTLM and Invoke-Command to remotely connect to the servers on the same domain and inventory scheduled tasks"
+""
+"Servers: $($Servers.Count) "
+$Servers | ForEach-Object {"$_"}
+""
 
-#List of servers to inventory
-$Servers = @(
-    "IO-NJE-WEB01",
-    "IO-AZR-WEB01",
-    "IO-AZR-INT01"
-    "IO-AZP-WEB01",
-    "IO-OH-WEB01"
-)
+if((Read-Host -Prompt "If you want to run in update mode type Y or press enter to continue in report mode") -like "*Y*"){
+    $update = $true # default false : set to true to write changes from modified report
+    Write-Host -ForegroundColor Yellow "Running in Update Mode"
+}else{
+    $update = $false
+    Write-Host -ForegroundColor Magenta "Running in Report Only Mode"
+}
+
+if($update){
+    [array]$Files = Get-ChildItem $RunDir -Filter "*.csv"
+    if($Files.Count -ne 1){
+        $Files = $Files | Out-GridView -Title "Select Update File" -PassThru  
+    }
+    $updateCSV = Import-Csv -Path $Files.FullName -Encoding UTF8
+}
+
 
 Function Get-OrdinalNumber {
     Param(
@@ -29,6 +53,41 @@ Function Get-OrdinalNumber {
     Write-Output "$Num$Suffix"
 }
 
+Function Task-Match ($Csv, $Name, $Server){
+    if ($Csv -and $Name -and $Server){
+        [array]$Task = $Csv | Where-Object {
+            $_.Name -eq $Name -and
+            $_.Server -eq $Server
+        }
+        if($Task.Count -eq 1){
+            Return $Task
+        }else{
+            Return Write-Error "Found $($Task.Count) Tasks that match this description `nName: $Name`nServer: $Server"
+        }
+    }else{
+        Return Write-Error "Unable to validate inputs"
+    }
+}
+
+# Formats JSON in a nicer format than the built-in ConvertTo-Json does.
+function Format-Json([Parameter(Mandatory, ValueFromPipeline)][String] $json) {
+    $indent = 0;
+    ($json -Split '\n' |
+      % {
+        if ($_ -match '[\}\]]') {
+          # This line contains  ] or }, decrement the indentation level
+          $indent--
+        }
+        $line = (' ' * $indent * 2) + $_.TrimStart().Replace(':  ', ': ')
+        if ($_ -match '[\{\[]') {
+          # This line contains [ or {, increment the indentation level
+          $indent++
+        }
+        $line
+    }) -Join "`n"
+  }
+
+
 
 $TaskInventory = @() #Array of PSObjects for Task information
 
@@ -44,7 +103,7 @@ ForEach($Server in $Servers){
     } -ComputerName $Server
 
     ForEach($Task in $Tasks){
-        "TaskName: $($Task.TaskName)"
+        "TaskName: $($Task.TaskName) : $($Task.PSComputerName)"
         
         $Triggers = $Task.Triggers
         $TriggerType = $Triggers[0].CimClass.CimClassName.Replace("MSFT_Task","").Replace("Trigger","")
@@ -131,9 +190,49 @@ ForEach($Server in $Servers){
                     $reportconfig.EmailTo
                 }
             }elseif($configFile.Name -like "securitylist.txt"){
+                #if update is turned on
+                if($update){
+                    $CSVTask = Task-Match -Csv $updateCSV -Name $TaskDetails.Name -Server $TaskDetails.Server
+                    [array]$updateRecipients = $CSVTask.Recipients.Split(",")
+                    [array]$compare = Compare-Object -ReferenceObject $filecontents -DifferenceObject $updateRecipients
+                    if($compare.count -ge 1){
+                        Write-Host -ForegroundColor Yellow "Differences Detected - Updating Config File..."
+                        $compare
+                        $filecontents = $updateRecipients
+                        Invoke-Command -ScriptBlock {
+                            $args[0] | Out-File $args[1] -Force
+                        } -ComputerName $Task.PSComputerName -ArgumentList $filecontents,$configFile.FullName
+                    }else{
+                        Write-Host -ForegroundColor Cyan "No Recipient Mismatches found"
+                    }
+                }
+                
+                # runs regardless of update
                 $TaskDetails.Recipients = $filecontents
+
             }elseif($configFile.Name -like "config.json"){
                 $reportconfig = ($filecontents) -join "`n" | ConvertFrom-Json
+                #if Update is turned on
+                if($update){
+                    $CSVTask = Task-Match -Csv $updateCSV -Name $TaskDetails.Name -Server $TaskDetails.Server
+                    [array]$updateRecipients = $CSVTask.Recipients.Split(",")
+                    [array]$compare = Compare-Object -ReferenceObject $reportconfig.Recipients -DifferenceObject $updateRecipients
+                    if($compare.count -ge 1){
+                        Write-Host -ForegroundColor Yellow "Differences Detected - Updating Config File..."
+                        $compare
+                        $reportconfig.Recipients = $updateRecipients
+                        $reportconfig_str = $reportconfig | ConvertTo-Json | Format-Json
+                        Invoke-Command -ScriptBlock {
+                            Write-Host -ForegroundColor Green "updating file contents: $($args[1])..."
+                            $args[0] | Out-File $args[1] -Force
+                        } -ComputerName $Task.PSComputerName -ArgumentList $reportconfig_str,$configFile.FullName
+
+                    }else{
+                        Write-Host -ForegroundColor Cyan "No Recipient Mismatches found"
+                    }
+                    
+                }
+
                 $TaskDetails.Recipients = $reportconfig.Recipients
             }else{
                 $TaskDetails.Recipients = $null
