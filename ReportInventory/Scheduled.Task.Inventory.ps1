@@ -21,7 +21,6 @@
 $ErrorActionPreference = "Stop"
 $RunDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
-<<<<<<< HEAD
 $jsonpath = "$RunDir\servers.txt"
 if(Test-Path $jsonpath){
     [array]$Servers = Get-Content $jsonpath
@@ -46,36 +45,6 @@ if((Read-Host -Prompt "If you want to run in update mode type Y or press enter t
     Write-Host -ForegroundColor Magenta "Running in Report Only Mode"
 }
 
-=======
-#Programatically documents all scheduled tasks that meet certain filters 
-$ErrorActionPreference = "Stop"
-$RunDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-
-$jsonpath = "$RunDir\servers.txt"
-if(Test-Path $jsonpath){
-    [array]$Servers = Get-Content $jsonpath
-}else{
-    Write-Error "Missing servers.txt in root directory"
-}
-
-
-Clear-Host
-"Scheduled.Task.Inventory"
-"This Script will use NTLM and Invoke-Command to remotely connect to the servers on the same domain and inventory scheduled tasks"
-""
-"Servers: $($Servers.Count) "
-$Servers | ForEach-Object {"$_"}
-""
-
-if((Read-Host -Prompt "If you want to run in update mode type Y or press enter to continue in report mode") -like "*Y*"){
-    $update = $true # default false : set to true to write changes from modified report
-    Write-Host -ForegroundColor Yellow "Running in Update Mode"
-}else{
-    $update = $false
-    Write-Host -ForegroundColor Magenta "Running in Report Only Mode"
-}
-
->>>>>>> 1f94d78b11ae3b630dc94ed09b88d86eede0094d
 if($update){
     [array]$Files = Get-ChildItem $RunDir -Filter "*.csv"
     if($Files.Count -ne 1){
@@ -274,11 +243,7 @@ ForEach($Server in $Servers){
                         Write-Host -ForegroundColor Yellow "Differences Detected - Updating Config File..."
                         $compare
                         $reportconfig.Recipients = $updateRecipients
-<<<<<<< HEAD
                         $reportconfig_str = $reportconfig | ConvertTo-Json -Depth 50 | Format-Json
-=======
-                        $reportconfig_str = $reportconfig | ConvertTo-Json | Format-Json
->>>>>>> 1f94d78b11ae3b630dc94ed09b88d86eede0094d
                         Invoke-Command -ScriptBlock {
                             Write-Host -ForegroundColor Green "updating file contents: $($args[1])..."
                             $args[0] | Out-File $args[1] -Force
